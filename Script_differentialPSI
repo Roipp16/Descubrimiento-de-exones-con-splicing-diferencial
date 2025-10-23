@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=FINAL_differential_exon_PSI
+#SBATCH --output=diff_exon_PSI.out
+#SBATCH --error=diffcompare_pipeline.err
+#SBATCH --time=24:00:00
+#SBATCH --mem=60G
+#SBATCH --cpus-per-task=8
+
+
+module load Miniconda3/24.7.1-0
+source /gpfs/hpc_apps/EL9/INTEL/software/Miniconda3/24.7.1-0/etc/profile.d/conda.sh
+conda activate /gpfs/res_projects/fsjd3/envs/exons
+
+# Añadir vast-tools al PATH
+export PATH=/gpfs/res_projects/fsjd3/envs/exons/vast-tools:$PATH
+
+#directorio de trabajo, se crearan dos carpetas despues del alineamiento
+cd /gpfs/res_projects/fsjd3/NB_exon/
+DATA_DIR=/gpfs/res_projects/fsjd3/data/NB_fastq/fastq  # Carpeta con los .fq.gz
+SPECIES=hg38      # Especie de referencia
+
+# Diccionario de muestras con grups
+
+# Arrays paralelos, toma unas 6 h por muestra
+SAMPLES=("CHP_212_1" "IMR5" "LAN1" "SH_SY5Y" "SK_N_AS" "SK_N_Be2C" "SK_N_DZ" "SK_N_FI" "SK_N_LP")
+GROUPS=("interm" "high" "interm" "low" "interm" "high" "low" "low" "high")
+### Alineación
+export VASTDB=/gpfs/res_projects/fsjd3/envs/exons   # ruta a tu DB
+
+if [ -d "/gpfs/res_projects/fsjd3/NB_exon/vast_out" ]; then
+  echo ">>> El alignment ya está hecho, no se repite."
+else
+  echo ">>> Ejecutando alineamiento..."
+	for i in "${!SAMPLES[@]}"; do
+   	 SAMPLE=${SAMPLES[$i]}
+   	 GROUP=${GROUPS[$i]}
+
+    # Detecta automáticamente los archivos paired-end
+   	 READ1=$(ls ${DATA_DIR}/${SAMPLE}*_1*.fastq.gz 2>/dev/null | head -n 1)
+   	 READ2=$(ls ${DATA_DIR}/${SAMPLE}*_2*.fastq.gz 2>/dev/null | head -n 1)
+
+   	 if [[ -f "$READ1" && -f "$READ2" ]]; then
+       	 echo ">>> Aligning $SAMPLE (Group: $GROUP)"
+   	 vast-tools align "$READ1" "$READ2" \
+    		-sp $SPECIES \
+    		-dbDir $VASTDB \
+    		--expr \
+    		-c 8 \
+    		--output /gpfs/res_projects/fsjd3/NB_exon/vast_out 
+
+	else
+        	echo "WARNING: FASTQ not found for $SAMPLE"
+   	 fi
+	done
+fi
+
+
+
+###  Combinar todos los alineamientos
+if [ -f "/gpfs/res_projects/fsjd3/NB_exon/vast_out/INCLUSION_LEVELS_FULL-hg38-9.tab" ]; then
+  echo ">>> El combine ya está hecho, no se repite."
+else
+  echo ">>> Running combine..."
+  vast-tools combine -o /gpfs/res_projects/fsjd3/NB_exon/vast_out -sp $SPECIES --dbDir $VASTDB 
+fi
+###  Preparar grupos para comparación. No se pueden aumentar los cores.
+
+INCLUSION=/gpfs/res_projects/fsjd3/NB_exon/vast_out/INCLUSION_LEVELS_FULL-hg38-9.tab #ruta a la inclusion.tab
+COMPARE_DIR=/gpfs/res_projects/fsjd3/NB_exon/vast_out/compare
+DIFF_DIR=/gpfs/res_projects/fsjd3/NB_exon/vast_out/diff
+
+# ==== Crear carpetas si no existen ====
+mkdir -p "$COMPARE_DIR"
+mkdir -p "$DIFF_DIR"
+
+### Comparaciones
+
+echo ">>> Running compare (LOW vs HIGH)..."
+vast-tools compare $INCLUSION \
+  -a SH_SY5Y_1,SK_N_FI_1,SK_N_DZ_1 -b IMR5_1,SK_N_Be2C_1,SK_N_LP_1 \
+  --min_dPSI 25 --min_range 5 \
+  --GO -sp $SPECIES --dbDir $VASTDB \
+  --plot_PSI --outFile LOW_vs_HIGH_c
+
+echo ">>> Running compare (LOW vs INTERM)..."
+vast-tools compare $INCLUSION \
+  -a SH_SY5Y_1,SK_N_FI_1,SK_N_DZ_1 -b CHP_212_1_1,LAN1_1,SK_N_AS_1 \
+  --min_dPSI 25 --min_range 5 \
+  --GO -sp $SPECIES --dbDir $VASTDB \
+  --plot_PSI --outFile LOW_vs_INTERM_c
+
+echo ">>> Running compare (INTERM vs HIGH)..."
+vast-tools compare $INCLUSION \
+  -a CHP_212_1_1,LAN1_1,SK_N_AS_1 -b IMR5_1,SK_N_Be2C_1,SK_N_LP_1 \
+  --min_dPSI 25 --min_range 5 \
+  --GO -sp $SPECIES --dbDir $VASTDB \
+  --plot_PSI --outFile INTERM_vs_HIGH_c
+
+### organizamos los resultados:
+mv /gpfs/res_projects/fsjd3/NB_exon/vast_out/*IR* /gpfs/res_projects/fsjd3/NB_exon/vast_out/compare/GO/
+mv /gpfs/res_projects/fsjd3/NB_exon/vast_out/*All* /gpfs/res_projects/fsjd3/NB_exon/vast_out/compare/All_events/
+mv /gpfs/res_projects/fsjd3/NB_exon/vast_out/*plot* /gpfs/res_projects/fsjd3/NB_exon/vast_out/compare/Plots/
+mv /gpfs/res_projects/fsjd3/NB_exon/vast_out/AltEx* /gpfs/res_projects/fsjd3/NB_exon/vast_out/compare/Alt_Exons/
+mv /gpfs/res_projects/fsjd3/NB_exon/vast_out/*_c /gpfs/res_projects/fsjd3/NB_exon/vast_out/compare/Sig_exons/
+mv /gpfs/res_projects/fsjd3/NB_exon/vast_out/BG* /gpfs/res_projects/fsjd3/NB_exon/vast_out/compare/BG/
+rm /gpfs/res_projects/fsjd3/NB_exon/vast_out/*config*
+
+#Análisis estadístico diferencial
+### Redefinimos variables
+
+LOW_SAMPLES="SH_SY5Y_1,SK_N_FI_1,SK_N_DZ_1"
+INTERM_SAMPLES="CHP_212_1_1,LAN1_1,SK_N_AS_1"
+HIGH_SAMPLES="IMR5_1,SK_N_Be2C_1,SK_N_LP_1"
+
+### Comparaciones con diff
+
+echo ">>> Running diff (INTERM vs HIGH)..."
+vast-tools diff -a CHP_212_1_1,LAN1_1,SK_N_AS_1 -b IMR5_1,SK_N_Be2C_1,SK_N_LP_1 -c 8 -r 0.95 -m 0.20 -e 10 -S 1 -o /gpfs/res_projects/fsjd3/NB_exon/vast_out/diff -d IH \
+  --sampleNameA CHP_212_1_1,LAN1_1,SK_N_AS_1 \
+  --sampleNameB IMR5_1,SK_N_Be2C_1,SK_N_LP_1 \
+  -i /gpfs/res_projects/fsjd3/NB_exon/vast_out/INCLUSION_LEVELS_FULL-hg38-9.tab
+
+echo ">>> Running diff (LOW vs HIGH)..."
+vast-tools diff -a SH_SY5Y_1,SK_N_FI_1,SK_N_DZ_1 -b SK_N_Be2C_1,SK_N_LP_1,IMR5_1 -c 8 -r 0.95 -m 0.20 -e 10 -S 1 -o /gpfs/res_projects/fsjd3/NB_exon/vast_out/diff -d LH \
+  --sampleNameA SH_SY5Y_1,SK_N_FI_1,SK_N_DZ_1 \
+  --sampleNameB SK_N_Be2C_1,SK_N_LP_1,IMR5_1 \
+  -i /gpfs/res_projects/fsjd3/NB_exon/vast_out/INCLUSION_LEVELS_FULL-hg38-9.tab
+
+echo ">>> Running diff (LOW vs INTERM)..."
+vast-tools diff -a SK_N_FI_1,SK_N_DZ_1,SH_SY5Y_1 -b CHP_212_1_1,LAN1_1,SK_N_AS_1 -c 8 -r 0.95 -m 0.20 -e 10 -S 1 -o /gpfs/res_projects/fsjd3/NB_exon/vast_out/diff -d LI \
+  --sampleNameA SK_N_FI_1,SK_N_DZ_1,SH_SY5Y_1 \
+  --sampleNameB CHP_212_1_1,LAN1_1,SK_N_AS_1 \
+  -i /gpfs/res_projects/fsjd3/NB_exon/vast_out/INCLUSION_LEVELS_FULL-hg38-9.tab
