@@ -1,9 +1,10 @@
-#Carga de paquetes necesarios
+### Carga de paquetes necesarios de R en el servidor
 lib.path="/gpfs/res_projects/fsjd3/rlib/"
 .libPaths(c(lib.path,.libPaths()))
 R_LIBS_USER="/gpfs/res_projects/fsjd3/rlib/"
 
-load("bam.Rdata")
+### Para este script, se usan diferentes checkpoints ya que es un script computacionalmente exigente
+### Como inputs es necesario disponer de los ficheros BAM de los datos a analizar.
 
 library(GenomicFeatures) 
 library(txdbmaker)
@@ -19,7 +20,9 @@ rdata_file <- "bam.Rdata"
 rdata_file2 <- "diff_exons_finished.Rdata"
 
 
-# 1. Carga BAM files, anotación y cálculo de Overlaps. Necesarios los BAM y un archivo genes.gtf
+# 1. Carga BAM files, anotación y cálculo de Overlaps. El input serán los BAM y un archivo genes.gtf
+### Se consulta si tenemos ya los BAM analizados: 
+
 if (file.exists(rdata_file)) {
   cat("Cargando datos desde", rdata_file, "...\n")
   load(rdata_file, envir = parent.frame(), verbose = FALSE)
@@ -42,7 +45,9 @@ if (file.exists(rdata_file)) {
 
   register(SerialParam())
   
-  #separamos de 3 en 3 BAMs
+  ### Para optimizar el tiempo de ejecución se separan los BAMs de 3 en 3, ya que en mayor número
+  ### se requiriría demasiado poder computacional. Con 3 no hay problema
+  
   batch_size <- 3
   n_bams <- length(bamFiles)
   batch_indices <- split(seq_len(n_bams), ceiling(seq_len(n_bams) / batch_size))
@@ -67,8 +72,11 @@ if (file.exists(rdata_file)) {
   
   save(se_combined, file = rdata_file)
 }
+# -------------      FIN DEL CHECKPOINT 1      -------------
+
 
 # 2. Cálculo DEXSeq dataset y análisis comparativo
+### Se comprueba existencia del checkpoint 2:
 
 if (file.exists(rdata_file2)) {
   cat("Cargando datos desde", rdata_file2, "...\n")
@@ -79,11 +87,10 @@ if (file.exists(rdata_file2)) {
   groups <- c("interm", "high", "interm", "low", "interm", "high", "low", "low", "high")
   colData(se_combined)$sample <- factor(colnames(se_combined))
   
-#Importante: el que haya en primera posición actuará como referencia. hacemos 1 para cada grupo
+### IMPORTANTE: el que haya en primera posición actuará como referencia. hacemos 1 para cada grupo
+  #Filtramos para hacer las comparaciones: 
   
-  #Filtramos para hacer las comparaciones 
-  
-  # 1r grupo low-high
+  # 1r grupo low-high:
   cat("Empezando comparación low x high\n")
   idx <- which(groups %in% c("low", "high"))
   se_sub <- se_combined[, idx]
@@ -92,25 +99,21 @@ if (file.exists(rdata_file2)) {
   colData(se_sub)$sample <- factor(colnames(se_sub))
   colData(se_sub)$condition <- factor(groups_sub, levels = c("low", "high"))
   
-  cat("1\n")
   dxd_low_high <- DEXSeqDataSetFromSE(se_sub, design = ~ sample + exon + condition:exon)
-  cat("2\n")
   dxd_low_high <- estimateSizeFactors(dxd_low_high)
-  cat("3\n")
   dxd_low_high <- estimateDispersions(dxd_low_high)
-  cat("4\n")
   dxd_low_high <- testForDEU(dxd_low_high)
-  cat("5\n")
   dxd_low_high <- estimateExonFoldChanges(dxd_low_high, fitExpToVar = "condition")
-  cat("6\n")
-  
+
+  ### como hablamos de mucho tiempo de ejecución, se guarda un subcheckpoint: 
   save.image(file="1diff_exons.RData")
   cat("Rdata saved in 1diffexons")
+  
   # resultados
   res_low_high <- DEXSeq::DEXSeqResults(dxd_low_high)
   res_low_high_df <- as.data.frame(res_low_high)
   
-  # Fuerza a que toda columna lista se vuelva carácter
+  # Fuerza a que toda columna lista se vuelva carácter para evitar errores
   for (col in names(res_low_high_df)) {
     if (is.list(res_low_high_df[[col]])) {
       res_low_high_df[[col]] <- vapply(res_low_high_df[[col]], 
@@ -121,7 +124,10 @@ if (file.exists(rdata_file2)) {
   
   # Exportar a CSV
   write.csv(res_low_high_df, file = "DEXSEQ_low_vs_high.csv", row.names = TRUE)
-  cat("csv comparacion 1 guardado\n")
+  cat("csv comparacion LOW-HIGH guardado\n")
+
+
+
   
   # 2º grupo interm-low
   cat("Empezando comparación interm x low\n")
@@ -132,18 +138,12 @@ if (file.exists(rdata_file2)) {
   colData(se_interm_low)$sample <- factor(colnames(se_interm_low))
   colData(se_interm_low)$condition <- factor(groups_interm_low, levels = c("interm", "low"))
   
-  cat("1\n")
   dxd_interm_low <- DEXSeqDataSetFromSE(se_interm_low, design = ~ sample + exon + condition:exon)
-  cat("2\n")
   dxd_interm_low <- estimateSizeFactors(dxd_interm_low)
-  cat("3\n")
   dxd_interm_low <- estimateDispersions(dxd_interm_low)
-  cat("4\n")
   dxd_interm_low <- testForDEU(dxd_interm_low)
-  cat("5\n")
   dxd_interm_low <- estimateExonFoldChanges(dxd_interm_low, fitExpToVar = "condition")
-  cat("6\n")
-  
+   
   # resultados
   res_interm_low <- DEXSeq::DEXSeqResults(dxd_interm_low)
   res_interm_low_df <- as.data.frame(res_interm_low)
@@ -159,7 +159,8 @@ if (file.exists(rdata_file2)) {
   
   # Exportar a CSV
   write.csv(res_interm_low_df, file = "DEXSEQ_interm_vs_low.csv", row.names = TRUE)
-  cat("csv comparacion 2 guardado\n")
+  cat("csv comparacion INTERM-LOW guardado\n")
+
   
   # 3er grupo high-interm
   cat("Empezando comparación high x interm\n")
@@ -170,18 +171,12 @@ if (file.exists(rdata_file2)) {
   colData(se_high_interm)$sample <- factor(colnames(se_high_interm))
   colData(se_high_interm)$condition <- factor(groups_high_interm, levels = c("high", "interm"))
   
-  cat("1\n")
   dxd_high_interm <- DEXSeqDataSetFromSE(se_high_interm, design = ~ sample + exon + condition:exon)
-  cat("2\n")
   dxd_high_interm <- estimateSizeFactors(dxd_high_interm)
-  cat("3\n")
   dxd_high_interm <- estimateDispersions(dxd_high_interm)
-  cat("4\n")
   dxd_high_interm <- testForDEU(dxd_high_interm)
-  cat("5\n")
   dxd_high_interm <- estimateExonFoldChanges(dxd_high_interm, fitExpToVar = "condition")
-  cat("6\n")
-  
+   
   # resultados
   res_high_interm <- DEXSeq::DEXSeqResults(dxd_high_interm)
   res_high_interm_df <- as.data.frame(res_high_interm)
@@ -197,7 +192,7 @@ if (file.exists(rdata_file2)) {
   
   # Exportar a CSV
   write.csv(res_high_interm_df, file = "DEXSEQ_high_vs_interm.csv", row.names = TRUE)
-  cat("csv comparacion 3 guardado\n")
+  cat("csv comparacion HIGH-INTERM guardado\n")
   
   # guardar objetos y sesión
   save(dxd_low_high, dxd_interm_low, dxd_high_interm, file = rdata_file2)
