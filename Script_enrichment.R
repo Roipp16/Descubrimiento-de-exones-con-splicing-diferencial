@@ -223,7 +223,3 @@ ridgeplot(ego2) +
     axis.text.y = element_text(family = "Courier", size = 12),  
     plot.title = element_text(hjust = 0.5, face = "bold", size = 14) 
   )
-
-
-
-#cambiar comparativas 
