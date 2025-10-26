@@ -73,7 +73,7 @@ DIFF_DIR=/gpfs/res_projects/fsjd3/NB_exon/vast_out/diff
 mkdir -p "$COMPARE_DIR"
 mkdir -p "$DIFF_DIR"
 
-### Comparaciones con los filtros deseados
+### Comparaciones con los filtros deseados 
 
 echo ">>> Running compare (LOW vs HIGH)..."
 vast-tools compare $INCLUSION \
