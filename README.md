@@ -8,8 +8,9 @@ Tenemos, realmente, dos análisis que paren de diferentes inputs, se detalla a c
    Output: Tablas comparativas para cada grupo XXXXX
    Código escrito en lenguaje R.
 
-2) Script_enrichment.R
-   Input
+2) Script_Enrichment.R
+   Input: Tablas resultado del paso anterior
+   Output: Gráficos de enriquecimiento de los resultados
 
 1) Fichero Script_differentialPSI
    Input: Ficheros FASTQ dentro de una carpeta con los nombes adientes a cada una de las muestras.
