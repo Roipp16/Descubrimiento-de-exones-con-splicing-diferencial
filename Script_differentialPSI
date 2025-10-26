@@ -6,7 +6,7 @@
 #SBATCH --mem=60G
 #SBATCH --cpus-per-task=8
 
-
+#cargar el modulo de anaconda y activar entorno
 module load Miniconda3/24.7.1-0
 source /gpfs/hpc_apps/EL9/INTEL/software/Miniconda3/24.7.1-0/etc/profile.d/conda.sh
 conda activate /gpfs/res_projects/fsjd3/envs/exons
@@ -19,14 +19,13 @@ cd /gpfs/res_projects/fsjd3/NB_exon/
 DATA_DIR=/gpfs/res_projects/fsjd3/data/NB_fastq/fastq  # Carpeta con los .fq.gz
 SPECIES=hg38      # Especie de referencia
 
-# Diccionario de muestras con grups
-
 # Arrays paralelos, toma unas 6 h por muestra
 SAMPLES=("CHP_212_1" "IMR5" "LAN1" "SH_SY5Y" "SK_N_AS" "SK_N_Be2C" "SK_N_DZ" "SK_N_FI" "SK_N_LP")
 GROUPS=("interm" "high" "interm" "low" "interm" "high" "low" "low" "high")
 ### Alineación
-export VASTDB=/gpfs/res_projects/fsjd3/envs/exons   # ruta a tu DB
+export VASTDB=/gpfs/res_projects/fsjd3/envs/exons   # ruta a la  VastDB
 
+#Comprobar si alignment está hecho, si sí directamente pasa al siguiente paso
 if [ -d "/gpfs/res_projects/fsjd3/NB_exon/vast_out" ]; then
   echo ">>> El alignment ya está hecho, no se repite."
 else
@@ -56,24 +55,25 @@ fi
 
 
 
-###  Combinar todos los alineamientos
+###  Combinar todos los alineamientos para conseguir la INCLUSION TABLE
 if [ -f "/gpfs/res_projects/fsjd3/NB_exon/vast_out/INCLUSION_LEVELS_FULL-hg38-9.tab" ]; then
   echo ">>> El combine ya está hecho, no se repite."
 else
   echo ">>> Running combine..."
   vast-tools combine -o /gpfs/res_projects/fsjd3/NB_exon/vast_out -sp $SPECIES --dbDir $VASTDB 
 fi
-###  Preparar grupos para comparación. No se pueden aumentar los cores.
+
+###  Preparar grupos para comparación. No se pueden aumentar los cores. Es muy rápido, simplemente filtra
 
 INCLUSION=/gpfs/res_projects/fsjd3/NB_exon/vast_out/INCLUSION_LEVELS_FULL-hg38-9.tab #ruta a la inclusion.tab
-COMPARE_DIR=/gpfs/res_projects/fsjd3/NB_exon/vast_out/compare
+COMPARE_DIR=/gpfs/res_projects/fsjd3/NB_exon/vast_out/compare #directorio donde queremos los resultados
 DIFF_DIR=/gpfs/res_projects/fsjd3/NB_exon/vast_out/diff
 
-# ==== Crear carpetas si no existen ====
+### Crear carpetas si no existen 
 mkdir -p "$COMPARE_DIR"
 mkdir -p "$DIFF_DIR"
 
-### Comparaciones
+### Comparaciones con los filtros deseados
 
 echo ">>> Running compare (LOW vs HIGH)..."
 vast-tools compare $INCLUSION \
@@ -96,7 +96,7 @@ vast-tools compare $INCLUSION \
   --GO -sp $SPECIES --dbDir $VASTDB \
   --plot_PSI --outFile INTERM_vs_HIGH_c
 
-### organizamos los resultados:
+### El problema es que todos los resultados se generan en la carpeta principal, pero organizamos los resultados manualmente:
 mv /gpfs/res_projects/fsjd3/NB_exon/vast_out/*IR* /gpfs/res_projects/fsjd3/NB_exon/vast_out/compare/GO/
 mv /gpfs/res_projects/fsjd3/NB_exon/vast_out/*All* /gpfs/res_projects/fsjd3/NB_exon/vast_out/compare/All_events/
 mv /gpfs/res_projects/fsjd3/NB_exon/vast_out/*plot* /gpfs/res_projects/fsjd3/NB_exon/vast_out/compare/Plots/
@@ -112,7 +112,7 @@ LOW_SAMPLES="SH_SY5Y_1,SK_N_FI_1,SK_N_DZ_1"
 INTERM_SAMPLES="CHP_212_1_1,LAN1_1,SK_N_AS_1"
 HIGH_SAMPLES="IMR5_1,SK_N_Be2C_1,SK_N_LP_1"
 
-### Comparaciones con diff
+### Comparaciones con diff, importante usar el SampleName, sino cogerá como nombre de etiqueta el primero de cada grupo
 
 echo ">>> Running diff (INTERM vs HIGH)..."
 vast-tools diff -a CHP_212_1_1,LAN1_1,SK_N_AS_1 -b IMR5_1,SK_N_Be2C_1,SK_N_LP_1 -c 8 -r 0.95 -m 0.20 -e 10 -S 1 -o /gpfs/res_projects/fsjd3/NB_exon/vast_out/diff -d IH \
